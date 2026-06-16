@@ -1,0 +1,52 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install pandas numpy pytest pytest-mock loguru PyYAML requests
+
+    - name: Run pipeline smoke test
+      run: |
+        python -c "
+        from src.transformation.bronze_transform import process_synthetic_waiting_list
+        from src.transformation.silver_transform import build_silver_waiting_list
+        from src.transformation.gold_aggregation import build_gold_national_trend
+        from src.ingestion.hse_loader import load_hse_data
+
+        print('Running pipeline smoke test...')
+        bronze = process_synthetic_waiting_list('data/bronze/waiting_list.parquet')
+        print(f'Bronze: {len(bronze):,} rows')
+
+        silver = build_silver_waiting_list('data/bronze/waiting_list.parquet', 'data/silver/waiting_list.parquet')
+        print(f'Silver: {len(silver):,} rows')
+
+        hse = load_hse_data()
+        from src.transformation.silver_transform import build_silver_gp_coverage
+        gp = build_silver_gp_coverage('data/raw/hse/gp_visit_cards.csv', 'data/silver/gp_coverage.parquet')
+        print(f'GP coverage: {len(gp):,} rows')
+
+        national = build_gold_national_trend('data/silver/waiting_list.parquet', 'data/gold/national_trend.parquet')
+        print(f'Gold trend: {len(national):,} rows')
+        print('✅ All pipeline stages passed')
+        "
+
+    - name: Run unit tests
+      run: pytest tests/ -v --tb=short
